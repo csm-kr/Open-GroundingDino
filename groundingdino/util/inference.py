@@ -1,5 +1,7 @@
 from typing import Tuple, List
 
+import os
+import sys
 import cv2
 import numpy as np
 import supervision as sv
@@ -8,8 +10,8 @@ from PIL import Image
 from torchvision.ops import box_convert
 import bisect
 
-import groundingdino.datasets.transforms as T
-from groundingdino.models import build_model
+from datasets import transforms as T
+from models import build_model
 from groundingdino.util.misc import clean_state_dict
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import get_phrases_from_posmap
@@ -24,6 +26,25 @@ def preprocess_caption(caption: str) -> str:
     if result.endswith("."):
         return result
     return result + "."
+
+
+def load_dipex(model_config_path: str, model_checkpoint_path: str, device: str = "cuda"):
+    args = SLConfig.fromfile(model_config_path)
+    args.device = device
+    checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
+    model_state = checkpoint.get("model", {})
+    
+    # get number of prompts
+    prompt_keys = [k for k in model_state.keys() if "ca_prompts" in k]
+    num_prompts = len(prompt_keys)
+    
+    args.init_prompt_num = num_prompts
+    model = build_model(args)
+
+    model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+    model.eval()
+    
+    return model
 
 
 def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda"):
@@ -69,13 +90,14 @@ def predict(
 
     prediction_logits = outputs["pred_logits"].cpu().sigmoid()[0]  # prediction_logits.shape = (nq, 256)
     prediction_boxes = outputs["pred_boxes"].cpu()[0]  # prediction_boxes.shape = (nq, 4)
+    captions = ' '.join(map(str, range(1, model.prompt_tree.get_length() + 1))) + ' ' + caption
 
     mask = prediction_logits.max(dim=1)[0] > box_threshold
     logits = prediction_logits[mask]  # logits.shape = (n, 256)
     boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
 
     tokenizer = model.tokenizer
-    tokenized = tokenizer(caption)
+    tokenized = tokenizer(captions)
     
     if remove_combined:
         sep_idx = [i for i in range(len(tokenized['input_ids'])) if tokenized['input_ids'][i] in [101, 102, 1012]]

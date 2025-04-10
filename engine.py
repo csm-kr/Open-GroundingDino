@@ -97,6 +97,50 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 print("BREAK!"*5)
                 break
 
+        if _cnt % 7000 == 0:
+            # expand every epoch
+            if hasattr(criterion, 'prompt_act_counts') and criterion.prompt_act_counts is not None:
+                prompt_act_counts = criterion.prompt_act_counts.cpu().numpy()
+                k = 3  # hyperparameter
+                model.prompt_tree.expand_parent(prompt_act_counts, k=k)
+            
+            # reset for the next epochs
+            criterion.prompt_act_counts = None
+            
+            # must ensure it's updated in the optimizer
+            existing_params = set()
+            for pg in optimizer.param_groups:
+                for p in pg['params']:
+                    existing_params.add(id(p))
+
+            # check if any model params are not in the optimizer
+            new_params = []
+            for p in model.parameters():
+                if p.requires_grad and id(p) not in existing_params:
+                    new_params.append(p)
+                    
+            # if found new params, add them to the optimizer's param groups
+            if new_params:
+                print(f"Adding {len(new_params)} new params to the optimizer.")
+                optimizer.add_param_group({'params': new_params})
+    
+        if _cnt % 100 == 0: 
+            print(model.prompt_tree.get_mac())
+            
+        if (_cnt + 1) % 2000 == 0:
+            # try to save in middle
+            checkpoint_path = f'{args.output_dir}/epoch_{epoch}_ckpt_iter{_cnt}.pth'
+            weights = {
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+                'args': args,
+            }
+
+            utils.save_on_master(weights, checkpoint_path)
+            print(f"Saved checkpoint at epoch {epoch} and iter {_cnt}")
+
     if getattr(criterion, 'loss_weight_decay', False):
         criterion.loss_weight_decay(epoch=epoch)
     if getattr(criterion, 'tuning_matching', False):

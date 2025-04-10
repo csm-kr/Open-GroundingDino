@@ -165,6 +165,14 @@ def main(args):
                 if keyword in name:
                     parameter.requires_grad_(False)
                     break
+    
+    ### DiPEx: freeze the whole model except the ca prompts
+    for parameter in model.parameters():
+        parameter.requires_grad_(False)
+        
+    for param in model_without_ddp.prompt_tree.ca_prompts:
+        param.requires_grad_(True)
+    
     logger.info("params after freezing:\n"+json.dumps({n: p.numel() for n, p in model.named_parameters() if p.requires_grad}, indent=2))
 
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,

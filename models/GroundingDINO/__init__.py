@@ -13,3 +13,4 @@
 # ------------------------------------------------------------------------
 
 from .groundingdino import build_groundingdino
+from .dipex import build_dipex
